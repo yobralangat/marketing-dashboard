@@ -23,25 +23,44 @@ except FileNotFoundError:
 app = dash.Dash(__name__, external_stylesheets=[APP_THEME], suppress_callback_exceptions=True)
 server = app.server
 
-# --- App Layout ---
-app.layout = dbc.Container(fluid=True, className="p-4 bg-light", children=[
-    dbc.Row([
-        dbc.Col(html.H1("Marketing Strategy Dashboard", className="text-primary"), md=6),
-        dbc.Col([
-            dbc.Label("Filter by Industry"),
-            dcc.Dropdown(id='industry-filter', options=[{'label': i, 'value': i} for i in sorted(df['industry'].unique())], value=df['industry'].unique()[0])
-        ], md=3),
-        dbc.Col([
-            dbc.Label("Filter by Company Size"),
-            dcc.Dropdown(id='size-filter', options=[{'label': i, 'value': i} for i in df['company_size'].cat.categories], value=df['company_size'].cat.categories[0])
-        ], md=3)
-    ], align="center", className="mb-4"),
-    dbc.Tabs(id="dashboard-tabs", active_tab="tab-overview", children=[
-        dbc.Tab(label="Executive Overview", tab_id="tab-overview"),
-        dbc.Tab(label="Channel Performance", tab_id="tab-channel"),
-        dbc.Tab(label="Audience Deep-Dive", tab_id="tab-audience"),
-    ]),
-    html.Div(id="tab-content-container", className="mt-4")
+# --- App Layout (with a fixed-width, centered container) ---
+app.layout = html.Div(className="bg-light", style={'minHeight': '100vh'}, children=[
+    dbc.Container([
+        # Header
+        dbc.Row([
+            dbc.Col(html.H1("Marketing Strategy Dashboard", className="text-primary"), md=6),
+            dbc.Col([
+                dbc.Label("Filter by Industry"),
+                dcc.Dropdown(
+                    id='industry-filter',
+                    options=[{'label': i, 'value': i} for i in sorted(df['industry'].unique())],
+                    value=df['industry'].unique()[0]
+                )
+            ], md=3),
+            dbc.Col([
+                dbc.Label("Filter by Company Size"),
+                dcc.Dropdown(
+                    id='size-filter',
+                    options=[{'label': i, 'value': i} for i in df['company_size'].cat.categories],
+                    value=df['company_size'].cat.categories[0]
+                )
+            ], md=3)
+        ], align="center", className="py-4"),
+
+        # Main Tabbed Interface
+        dbc.Tabs(id="dashboard-tabs", active_tab="tab-overview", children=[
+            dbc.Tab(label="Executive Overview", tab_id="tab-overview"),
+            dbc.Tab(label="Channel Performance", tab_id="tab-channel"),
+            dbc.Tab(label="Audience Deep-Dive", tab_id="tab-audience"),
+        ]),
+        
+        # Content area for the active tab
+        dcc.Loading(
+            id="loading-spinner",
+            type="circle",
+            children=html.Div(id="tab-content", className="mt-4")
+        )
+    ], fluid=False) # This is the key: the content container is NOT fluid
 ])
 
 # --- Main Callback to Render Tab Content ---
