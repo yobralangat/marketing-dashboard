@@ -1,5 +1,7 @@
+# preprocess.py
 import pandas as pd
 import os
+import datetime as dt
 
 def preprocess_marketing_data(input_file='data/digital_marketing_campaigns_smes.CSV'):
     """
@@ -39,12 +41,6 @@ def preprocess_marketing_data(input_file='data/digital_marketing_campaigns_smes.
     if 'success' in df.columns:
         df['success_status'] = df['success'].apply(lambda x: 'Successful' if x == 1 else 'Unsuccessful')
 
-    if 'ad_spend' in df.columns and 'audience_reach' in df.columns:
-        df['cost_per_reach'] = (df['ad_spend'] / df['audience_reach']).where(df['audience_reach'] > 0, 0)
-    
-    if 'ad_spend' in df.columns and 'engagement_metric' in df.columns:
-        df['cost_per_engagement'] = (df['ad_spend'] / df['engagement_metric']).where(df['engagement_metric'] > 0, 0)
-    
     numeric_cols = ['ad_spend', 'duration', 'engagement_metric', 'conversion_rate', 'audience_reach']
     for col in numeric_cols:
         if col in df.columns:
@@ -53,11 +49,16 @@ def preprocess_marketing_data(input_file='data/digital_marketing_campaigns_smes.
     if 'audience_reach' in df.columns:
         df['audience_reach'] = df['audience_reach'].round(0).astype(int)
 
-    # --- ** NEW: Calculate raw number of Conversions for Funnel Chart ** ---
     if 'audience_reach' in df.columns and 'conversion_rate' in df.columns:
-        print("Calculating raw conversions...")
-        # Conversion rate is a percentage, so divide by 100.
         df['conversions'] = (df['audience_reach'] * (df['conversion_rate'] / 100)).astype(int)
+    
+    # Filter out non-product entries
+    if 'description' in df.columns:
+        df['description_lower'] = df['description'].str.lower()
+        non_product_keywords = ['adjustment', 'manual', 'postage', 'discount', 'bank charges', 'credit', 'write off', 'carriage', 'dotcom']
+        is_non_product = df['description_lower'].str.contains('|'.join(non_product_keywords), na=False)
+        df = df[~is_non_product]
+        df.drop(columns=['description_lower'], inplace=True)
 
     output_path = 'assets/marketing_data.parquet'
     print(f"Saving processed data to '{output_path}'...")
@@ -66,4 +67,5 @@ def preprocess_marketing_data(input_file='data/digital_marketing_campaigns_smes.
     print("Pre-processing complete!")
 
 if __name__ == '__main__':
-    preprocess_marketing_data()
+    # Make sure to pass the correct path to your raw CSV file
+    preprocess_marketing_data(input_file='data/digital_marketing_campaigns_smes.CSV')
