@@ -1,10 +1,14 @@
-# app.py (Optimized)
+# app.py (ULTRA Performance)
 import pandas as pd
 import dash
 from dash import dcc, html, Input, Output, State
 import dash_bootstrap_components as dbc
 import plotly.express as px
 from dotenv import load_dotenv
+import uuid # Used to generate unique session IDs
+
+# --- NEW: Caching Setup ---
+from flask_caching import Cache
 
 # Import the AI insight generator functions
 from insights_generator import generate_overview_insights, generate_channel_insights, generate_audience_insights
@@ -13,8 +17,21 @@ from insights_generator import generate_overview_insights, generate_channel_insi
 load_dotenv()
 APP_THEME = dbc.themes.LUX
 
-# --- Load the FAST Pre-processed Data ---
-# This part is fine, the data loads only once when the app starts.
+# --- Initialize the Dash App ---
+app = dash.Dash(__name__, external_stylesheets=[APP_THEME], suppress_callback_exceptions=True)
+server = app.server
+
+# --- NEW: Configure Server-Side Caching ---
+# We configure a simple filesystem cache. This is perfect for Railway.
+cache = Cache(app.server, config={
+    'CACHE_TYPE': 'filesystem',
+    'CACHE_DIR': 'cache-directory'
+})
+# Timeout in seconds (e.g., 1 hour). Data is auto-cleared after this time.
+CACHE_TIMEOUT = 3600
+
+# --- Load Data ---
+# This remains the same, loading the data once at startup.
 try:
     df = pd.read_parquet('assets/marketing_data.parquet')
     print("--- APP: Pre-processed Parquet file loaded successfully. ---")
@@ -22,16 +39,10 @@ except FileNotFoundError:
     print("--- APP FATAL ERROR: Processed data file not found. Please run 'preprocess.py' first. ---")
     exit()
 
-# --- Initialize the Dash App ---
-app = dash.Dash(__name__, external_stylesheets=[APP_THEME], suppress_callback_exceptions=True)
-server = app.server
-
 # --- App Layout ---
 app.layout = html.Div(className="bg-light", style={'minHeight': '100vh'}, children=[
-    # --- NEW: Data Store ---
-    # This invisible component will hold the filtered data in the user's browser session.
-    # It acts as our application's "short-term memory".
-    dcc.Store(id='filtered-data-store'),
+    # --- The dcc.Store now only holds a tiny session ID string ---
+    dcc.Store(id='session-id-store'),
     
     dbc.Container([
         dbc.Row([
@@ -70,47 +81,54 @@ app.layout = html.Div(className="bg-light", style={'minHeight': '100vh'}, childr
         dcc.Loading(
             id="loading-spinner",
             type="circle",
+            # We wrap the tab content with a loading spinner for a seamless feel.
             children=html.Div(id="tab-content", className="mt-4")
         )
     ], fluid=False)
 ])
 
 # --- NEW CALLBACK 1: The Data Filtering Engine ---
-# This callback's ONLY job is to listen to the filters and update the dcc.Store.
-# It does the expensive filtering work ONCE.
+# This is the ONLY callback that touches the large original DataFrame.
+# It filters the data, saves it to the server-side cache, and returns ONLY a session ID.
 @app.callback(
-    Output('filtered-data-store', 'data'),
+    Output('session-id-store', 'data'),
     Input('industry-filter', 'value'),
     Input('size-filter', 'value')
 )
-def update_filtered_data_store(selected_industry, selected_size):
+def update_data_and_get_session_id(selected_industry, selected_size):
     if not selected_industry or not selected_size:
         return dash.no_update
 
+    # Generate a unique ID for this user's filter selection
+    session_id = str(uuid.uuid4())
+    
     filtered_df = df[(df['industry'] == selected_industry) & (df['company_size'] == selected_size)]
     
-    # Dash components can only exchange JSON-serializable data.
-    # We convert the filtered DataFrame to a JSON string to store it.
-    return filtered_df.to_json(date_format='iso', orient='split')
+    # Save the filtered DataFrame to the server's cache, keyed by the session ID
+    cache.set(session_id, filtered_df, timeout=CACHE_TIMEOUT)
+    
+    # Send *only the ID* to the browser. This is extremely fast.
+    return session_id
 
 # --- REFACTORED CALLBACK 2: Renders Charts and KPIs ---
-# This callback is now MUCH FASTER. It doesn't listen to the filters anymore.
-# It listens for changes in the 'filtered-data-store'.
+# This callback now triggers whenever the session ID changes.
 @app.callback(
     Output('tab-content', 'children'),
     Input('dashboard-tabs', 'active_tab'),
-    Input('filtered-data-store', 'data') # <-- Listens to the store!
+    Input('session-id-store', 'data') # <-- Listens for the session ID
 )
-def render_charts_and_kpis(active_tab, jsonified_filtered_data):
-    if not jsonified_filtered_data:
+def render_charts_and_kpis(active_tab, session_id):
+    if not session_id:
         return dash.no_update
 
-    # Convert the JSON string back into a DataFrame. This is very fast.
-    filtered_df = pd.read_json(jsonified_filtered_data, orient='split')
+    # Retrieve the filtered DataFrame from the server's cache using the ID. Instant.
+    filtered_df = cache.get(session_id)
     
-    if filtered_df.empty:
-        return dbc.Alert("No data available for the selected filters.", color="warning", className="m-4")
+    if filtered_df is None or filtered_df.empty:
+        return dbc.Alert("No data available for the selected filters (or session expired).", color="warning", className="m-4")
 
+    # The rest of this function is identical to before, but now runs instantly.
+    # ... (code for creating charts remains the same)
     template = "plotly_white"
     
     ai_button_and_output = html.Div([
@@ -126,75 +144,44 @@ def render_charts_and_kpis(active_tab, jsonified_filtered_data):
         total_reach = filtered_df['audience_reach'].sum()
         total_conversions = filtered_df['conversions'].sum()
         avg_conversion_rate = (total_conversions / total_reach * 100) if total_reach > 0 else 0
-        
         spend_by_channel = filtered_df.groupby('marketing_channel')['ad_spend'].sum().reset_index()
         fig_spend_dist = px.pie(spend_by_channel, names='marketing_channel', values='ad_spend', title="Ad Spend by Channel", hole=0.4, template=template)
-        
         total_engagement = filtered_df['engagement_metric'].sum()
         funnel_data = dict(number=[total_reach, total_engagement, total_conversions], stage=["Audience Reached", "Engagements", "Conversions"])
         fig_funnel = px.funnel(funnel_data, x='number', y='stage', title=f"Marketing Funnel", template=template)
         fig_funnel.update_layout(title_x=0.5)
-        
-        return html.Div([
-            dbc.Row([
-                dbc.Col(dbc.Card(dbc.CardBody([html.P("Total Ad Spend", className="text-muted"), html.H3(f"${total_spend:,.0f}")])), width=12, sm=6, lg=3, className="mb-4"),
-                dbc.Col(dbc.Card(dbc.CardBody([html.P("Total Audience Reach", className="text-muted"), html.H3(f"{total_reach:,}")])), width=12, sm=6, lg=3, className="mb-4"),
-                dbc.Col(dbc.Card(dbc.CardBody([html.P("Total Conversions", className="text-muted"), html.H3(f"{total_conversions:,}")])), width=12, sm=6, lg=3, className="mb-4"),
-                dbc.Col(dbc.Card(dbc.CardBody([html.P("Overall Conversion Rate", className="text-muted"), html.H3(f"{avg_conversion_rate:.2f}%")])), width=12, sm=6, lg=3, className="mb-4"),
-            ]),
-            dbc.Row([
-                dbc.Col(dbc.Card(dcc.Graph(figure=fig_spend_dist)), width=12, lg=5, className="mb-4"),
-                dbc.Col(dbc.Card(dcc.Graph(figure=fig_funnel)), width=12, lg=7, className="mb-4"),
-            ]),
-            ai_button_and_output
-        ])
-
+        return html.Div([dbc.Row([dbc.Col(dbc.Card(dbc.CardBody([html.P("Total Ad Spend", className="text-muted"), html.H3(f"${total_spend:,.0f}")])), width=12, sm=6, lg=3, className="mb-4"), dbc.Col(dbc.Card(dbc.CardBody([html.P("Total Audience Reach", className="text-muted"), html.H3(f"{total_reach:,}")])), width=12, sm=6, lg=3, className="mb-4"), dbc.Col(dbc.Card(dbc.CardBody([html.P("Total Conversions", className="text-muted"), html.H3(f"{total_conversions:,}")])), width=12, sm=6, lg=3, className="mb-4"), dbc.Col(dbc.Card(dbc.CardBody([html.P("Overall Conversion Rate", className="text-muted"), html.H3(f"{avg_conversion_rate:.2f}%")])), width=12, sm=6, lg=3, className="mb-4"), ]), dbc.Row([dbc.Col(dbc.Card(dcc.Graph(figure=fig_spend_dist)), width=12, lg=5, className="mb-4"), dbc.Col(dbc.Card(dcc.Graph(figure=fig_funnel)), width=12, lg=7, className="mb-4"), ]), ai_button_and_output])
     elif active_tab == "tab-channel":
         channel_performance = filtered_df.groupby('marketing_channel').agg(total_spend=('ad_spend', 'sum'), avg_cvr=('conversion_rate', 'mean'), avg_cpe=('cost_per_engagement', 'mean')).reset_index()
-        fig_channel_roi = px.scatter(
-            channel_performance, 
-            x='avg_cpe', y='avg_cvr', 
-            size='total_spend', color='marketing_channel',
-            title="Channel Performance: Cost vs. Conversion Rate",
-            labels={'avg_cpe': 'Average Cost Per Engagement ($)', 'avg_cvr': 'Average Conversion Rate (%)', 'total_spend': 'Total Ad Spend'},
-            template=template, size_max=60,
-            hover_name='marketing_channel',
-            hover_data={ 'avg_cvr':':.2f%', 'avg_cpe':':$.2f', 'total_spend':':$,.0f'}
-        )
-        return html.Div([
-            dbc.Row([dbc.Col(dbc.Card(dcc.Graph(figure=fig_channel_roi)), width=12, className="mb-4")]),
-            ai_button_and_output
-        ])
-
+        fig_channel_roi = px.scatter(channel_performance, x='avg_cpe', y='avg_cvr', size='total_spend', color='marketing_channel', title="Channel Performance: Cost vs. Conversion Rate", labels={'avg_cpe': 'Average Cost Per Engagement ($)', 'avg_cvr': 'Average Conversion Rate (%)', 'total_spend': 'Total Ad Spend'}, template=template, size_max=60, hover_name='marketing_channel', hover_data={'avg_cvr': ':.2f%', 'avg_cpe': ':$.2f', 'total_spend': ':$,.0f'})
+        return html.Div([dbc.Row([dbc.Col(dbc.Card(dcc.Graph(figure=fig_channel_roi)), width=12, className="mb-4")]), ai_button_and_output])
     elif active_tab == "tab-audience":
         fig_audience_cvr = px.bar(filtered_df.groupby('target_audience')['conversion_rate'].mean().sort_values().reset_index(), x='conversion_rate', y='target_audience', orientation='h', title='Avg. Conversion Rate by Audience', labels={'conversion_rate': 'Avg. Conversion Rate (%)', 'target_audience': 'Audience Segment'}, template=template)
         fig_device_cvr = px.bar(filtered_df.groupby('device')['conversion_rate'].mean().sort_values(ascending=False).reset_index(), x='device', y='conversion_rate', title='Avg. Conversion Rate by Device', labels={'conversion_rate': 'Avg. Conversion Rate (%)', 'device': 'Device Type'}, color='device', template=template)
-        return html.Div([
-            dbc.Row([
-                dbc.Col(dbc.Card(dcc.Graph(figure=fig_audience_cvr)), width=12, lg=6, className="mb-4"),
-                dbc.Col(dbc.Card(dcc.Graph(figure=fig_device_cvr)), width=12, lg=6, className="mb-4"),
-            ]),
-            ai_button_and_output
-        ])
+        return html.Div([dbc.Row([dbc.Col(dbc.Card(dcc.Graph(figure=fig_audience_cvr)), width=12, lg=6, className="mb-4"), dbc.Col(dbc.Card(dcc.Graph(figure=fig_device_cvr)), width=12, lg=6, className="mb-4"), ]), ai_button_and_output])
+
 
 # --- REFACTORED CALLBACK 3: The AI Summary ---
-# This callback is also MUCH FASTER. It doesn't filter the data anymore.
-# It uses the data that's already been filtered and stored.
+# This callback also uses the session ID to fetch data instantly from the cache.
 @app.callback(
     Output('ai-summary-content', 'children'),
     Input('generate-ai-summary-button', 'n_clicks'),
     State('dashboard-tabs', 'active_tab'),
-    State('filtered-data-store', 'data'), # <-- Gets data from the store!
+    State('session-id-store', 'data'), # <-- Gets the session ID
     prevent_initial_call=True
 )
-def generate_ai_summary(n_clicks, active_tab, jsonified_filtered_data):
-    if n_clicks == 0 or not jsonified_filtered_data:
+def generate_ai_summary(n_clicks, active_tab, session_id):
+    if n_clicks == 0 or not session_id:
         return ""
 
-    # No more filtering! Just read the JSON from the store.
-    filtered_df = pd.read_json(jsonified_filtered_data, orient='split')
+    # No more filtering! Just read from the cache using the ID.
+    filtered_df = cache.get(session_id)
     ai_generated_text = ""
 
+    # A check in case the cache expired between actions.
+    if filtered_df is None:
+        return dbc.Alert("Session expired. Please change a filter to refresh the data.", color="warning")
+        
     if active_tab == "tab-overview":
         total_reach = filtered_df['audience_reach'].sum()
         total_engagement = filtered_df['engagement_metric'].sum()
