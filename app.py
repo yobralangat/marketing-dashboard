@@ -1,4 +1,4 @@
-# app.py
+# app.py (Optimized)
 import pandas as pd
 import dash
 from dash import dcc, html, Input, Output, State
@@ -14,6 +14,7 @@ load_dotenv()
 APP_THEME = dbc.themes.LUX
 
 # --- Load the FAST Pre-processed Data ---
+# This part is fine, the data loads only once when the app starts.
 try:
     df = pd.read_parquet('assets/marketing_data.parquet')
     print("--- APP: Pre-processed Parquet file loaded successfully. ---")
@@ -27,6 +28,11 @@ server = app.server
 
 # --- App Layout ---
 app.layout = html.Div(className="bg-light", style={'minHeight': '100vh'}, children=[
+    # --- NEW: Data Store ---
+    # This invisible component will hold the filtered data in the user's browser session.
+    # It acts as our application's "short-term memory".
+    dcc.Store(id='filtered-data-store'),
+    
     dbc.Container([
         dbc.Row([
             dbc.Col(
@@ -69,18 +75,38 @@ app.layout = html.Div(className="bg-light", style={'minHeight': '100vh'}, childr
     ], fluid=False)
 ])
 
-# --- Main Callback for Rendering Content ---
+# --- NEW CALLBACK 1: The Data Filtering Engine ---
+# This callback's ONLY job is to listen to the filters and update the dcc.Store.
+# It does the expensive filtering work ONCE.
 @app.callback(
-    Output('tab-content', 'children'),
-    Input('dashboard-tabs', 'active_tab'),
+    Output('filtered-data-store', 'data'),
     Input('industry-filter', 'value'),
     Input('size-filter', 'value')
 )
-def render_charts_and_kpis(active_tab, selected_industry, selected_size):
-    if not all([active_tab, selected_industry, selected_size]):
+def update_filtered_data_store(selected_industry, selected_size):
+    if not selected_industry or not selected_size:
         return dash.no_update
 
     filtered_df = df[(df['industry'] == selected_industry) & (df['company_size'] == selected_size)]
+    
+    # Dash components can only exchange JSON-serializable data.
+    # We convert the filtered DataFrame to a JSON string to store it.
+    return filtered_df.to_json(date_format='iso', orient='split')
+
+# --- REFACTORED CALLBACK 2: Renders Charts and KPIs ---
+# This callback is now MUCH FASTER. It doesn't listen to the filters anymore.
+# It listens for changes in the 'filtered-data-store'.
+@app.callback(
+    Output('tab-content', 'children'),
+    Input('dashboard-tabs', 'active_tab'),
+    Input('filtered-data-store', 'data') # <-- Listens to the store!
+)
+def render_charts_and_kpis(active_tab, jsonified_filtered_data):
+    if not jsonified_filtered_data:
+        return dash.no_update
+
+    # Convert the JSON string back into a DataFrame. This is very fast.
+    filtered_df = pd.read_json(jsonified_filtered_data, orient='split')
     
     if filtered_df.empty:
         return dbc.Alert("No data available for the selected filters.", color="warning", className="m-4")
@@ -98,7 +124,6 @@ def render_charts_and_kpis(active_tab, selected_industry, selected_size):
     if active_tab == "tab-overview":
         total_spend = filtered_df['ad_spend'].sum()
         total_reach = filtered_df['audience_reach'].sum()
-        # --- POLISHED: Simplified .sum() as the column is guaranteed to exist ---
         total_conversions = filtered_df['conversions'].sum()
         avg_conversion_rate = (total_conversions / total_reach * 100) if total_reach > 0 else 0
         
@@ -133,13 +158,8 @@ def render_charts_and_kpis(active_tab, selected_industry, selected_size):
             title="Channel Performance: Cost vs. Conversion Rate",
             labels={'avg_cpe': 'Average Cost Per Engagement ($)', 'avg_cvr': 'Average Conversion Rate (%)', 'total_spend': 'Total Ad Spend'},
             template=template, size_max=60,
-            # --- UI/UX POLISH: Added hover_data for richer insights on mouse-over ---
             hover_name='marketing_channel',
-            hover_data={
-                'avg_cvr':':.2f%', # Format as percentage
-                'avg_cpe':':$.2f', # Format as currency
-                'total_spend':':$,.0f' # Format as currency
-            }
+            hover_data={ 'avg_cvr':':.2f%', 'avg_cpe':':$.2f', 'total_spend':':$,.0f'}
         )
         return html.Div([
             dbc.Row([dbc.Col(dbc.Card(dcc.Graph(figure=fig_channel_roi)), width=12, className="mb-4")]),
@@ -157,27 +177,28 @@ def render_charts_and_kpis(active_tab, selected_industry, selected_size):
             ai_button_and_output
         ])
 
-# --- Callback for SLOW AI Summary ---
+# --- REFACTORED CALLBACK 3: The AI Summary ---
+# This callback is also MUCH FASTER. It doesn't filter the data anymore.
+# It uses the data that's already been filtered and stored.
 @app.callback(
     Output('ai-summary-content', 'children'),
     Input('generate-ai-summary-button', 'n_clicks'),
     State('dashboard-tabs', 'active_tab'),
-    State('industry-filter', 'value'),
-    State('size-filter', 'value'),
+    State('filtered-data-store', 'data'), # <-- Gets data from the store!
     prevent_initial_call=True
 )
-def generate_ai_summary(n_clicks, active_tab, selected_industry, selected_size):
-    if n_clicks == 0:
+def generate_ai_summary(n_clicks, active_tab, jsonified_filtered_data):
+    if n_clicks == 0 or not jsonified_filtered_data:
         return ""
 
-    filtered_df = df[(df['industry'] == selected_industry) & (df['company_size'] == selected_size)]
+    # No more filtering! Just read the JSON from the store.
+    filtered_df = pd.read_json(jsonified_filtered_data, orient='split')
     ai_generated_text = ""
 
     if active_tab == "tab-overview":
         total_reach = filtered_df['audience_reach'].sum()
         total_engagement = filtered_df['engagement_metric'].sum()
         total_conversions = filtered_df['conversions'].sum()
-        # The function call is now correct
         ai_generated_text = generate_overview_insights(total_reach, total_engagement, total_conversions)
     elif active_tab == "tab-channel":
         ai_generated_text = generate_channel_insights(filtered_df)
