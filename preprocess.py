@@ -2,7 +2,7 @@
 import pandas as pd
 import os
 
-def preprocess_marketing_data(input_file='digital_marketing_campaign_smes.csv'): # Assuming the CSV is in the root
+def preprocess_marketing_data(input_file='data/digital_marketing_campaigns_smes.csv'): # Assuming the CSV is in the root
     if not os.path.exists('assets'):
         os.makedirs('assets')
     
@@ -64,4 +64,4 @@ def preprocess_marketing_data(input_file='digital_marketing_campaign_smes.csv'):
 
 if __name__ == '__main__':
     # Make sure you have your CSV file named correctly and in the right place.
-    preprocess_marketing_data('digital_marketing_campaign_smes.CSV')
+    preprocess_marketing_data('data/digital_marketing_campaigns_smes.CSV')
