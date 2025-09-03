@@ -60,15 +60,15 @@ app.layout = html.Div(className="bg-light", style={'minHeight': '100vh'}, childr
         dcc.Loading(
             id="loading-spinner",
             type="circle",
-            children=html.Div(id="tab-content", className="mt-4") # <-- This is the target Div
+            children=html.Div(id="tab-content", className="mt-4") # This is the target Div
         )
     ], fluid=False) # This is the key: the content container is NOT fluid
 ])
 print("--- APP: Layout created successfully. ---")
 
-# --- Main Callback for FAST Components ---
+# --- ** THE FIX IS HERE: The Output ID is now correct ** ---
 @app.callback(
-    Output('tab-content', 'children'), # <-- This now correctly targets the Div in the layout
+    Output('tab-content', 'children'), # This now correctly targets the Div in the layout
     Input('dashboard-tabs', 'active_tab'),
     Input('industry-filter', 'value'),
     Input('size-filter', 'value')
