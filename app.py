@@ -5,7 +5,7 @@ import dash_bootstrap_components as dbc
 import plotly.express as px
 from dotenv import load_dotenv
 
-# Import the new, AI-powered insight generator functions
+# Import the AI insight generator functions
 from insights_generator import generate_overview_insights, generate_channel_insights, generate_audience_insights
 
 # --- Configuration & Setup ---
@@ -15,15 +15,17 @@ APP_THEME = dbc.themes.LUX
 # --- Load the FAST Pre-processed Data ---
 try:
     df = pd.read_parquet('assets/marketing_data.parquet')
+    print("--- APP: Pre-processed Parquet file loaded successfully. ---")
 except FileNotFoundError:
-    print("FATAL ERROR: Processed data file not found. Please run 'preprocess.py' first.")
+    print("--- APP FATAL ERROR: Processed data file not found. Please run 'preprocess.py' first. ---")
     exit()
 
 # --- Initialize the Dash App ---
 app = dash.Dash(__name__, external_stylesheets=[APP_THEME], suppress_callback_exceptions=True)
 server = app.server
+print("--- APP: Dash app initialized. ---")
 
-# --- App Layout (with a fixed-width, centered container) ---
+# --- App Layout (with fixed-width container) ---
 app.layout = html.Div(className="bg-light", style={'minHeight': '100vh'}, children=[
     dbc.Container([
         # Header
@@ -54,44 +56,52 @@ app.layout = html.Div(className="bg-light", style={'minHeight': '100vh'}, childr
             dbc.Tab(label="Audience Deep-Dive", tab_id="tab-audience"),
         ]),
         
-        # Content area for the active tab
+        # Content area for the active tab, wrapped in a Loading component
         dcc.Loading(
             id="loading-spinner",
             type="circle",
-            children=html.Div(id="tab-content", className="mt-4")
+            children=html.Div(id="tab-content", className="mt-4") # <-- This is the target Div
         )
     ], fluid=False) # This is the key: the content container is NOT fluid
 ])
+print("--- APP: Layout created successfully. ---")
 
-# --- Main Callback to Render Tab Content ---
+# --- Main Callback for FAST Components ---
 @app.callback(
-    Output('tab-content-container', 'children'),
+    Output('tab-content', 'children'), # <-- This now correctly targets the Div in the layout
     Input('dashboard-tabs', 'active_tab'),
     Input('industry-filter', 'value'),
     Input('size-filter', 'value')
 )
 def render_charts_and_kpis(active_tab, selected_industry, selected_size):
-    if not all([active_tab, selected_industry, selected_size]): return dash.no_update
+    if not all([active_tab, selected_industry, selected_size]):
+        return dash.no_update
 
     filtered_df = df[(df['industry'] == selected_industry) & (df['company_size'] == selected_size)]
-    if filtered_df.empty: return dbc.Alert("No data available for the selected filters.", color="warning")
+    
+    if filtered_df.empty:
+        return dbc.Alert("No data available for the selected filters.", color="warning")
 
     template = "plotly_white"
+    
     ai_button_and_output = html.Div([
         html.Hr(className="my-4"),
-        dbc.Row([dbc.Col(dbc.Button("Generate AI Insights", id="generate-ai-summary-button", n_clicks=0, color="primary"), width="auto")], justify="center", className="mb-4"),
+        dbc.Row([
+            dbc.Col(dbc.Button("Generate AI Insights", id="generate-ai-summary-button", n_clicks=0, color="primary"), width="auto"),
+        ], justify="center", className="mb-4"),
         dcc.Loading(type="circle", children=html.Div(id="ai-summary-content"))
     ])
 
     if active_tab == "tab-overview":
         total_spend = filtered_df['ad_spend'].sum()
         total_reach = filtered_df['audience_reach'].sum()
-        total_conversions = filtered_df['conversions'].sum()
-        total_engagement = filtered_df['engagement_metric'].sum()
+        total_conversions = filtered_df.get('conversions', 0).sum()
         avg_conversion_rate = (total_conversions / total_reach * 100) if total_reach > 0 else 0
+        
         spend_by_channel = filtered_df.groupby('marketing_channel')['ad_spend'].sum().reset_index()
         fig_spend_dist = px.pie(spend_by_channel, names='marketing_channel', values='ad_spend', title="Ad Spend by Channel", hole=0.4, template=template)
         
+        total_engagement = filtered_df['engagement_metric'].sum()
         funnel_data = dict(number=[total_reach, total_engagement, total_conversions], stage=["Audience Reached", "Engagements", "Conversions"])
         fig_funnel = px.funnel(funnel_data, x='number', y='stage', title=f"Marketing Funnel", template=template)
         fig_funnel.update_layout(title_x=0.5)
@@ -144,16 +154,16 @@ def render_charts_and_kpis(active_tab, selected_industry, selected_size):
     prevent_initial_call=True
 )
 def generate_ai_summary(n_clicks, active_tab, selected_industry, selected_size):
-    if n_clicks == 0: return ""
+    if n_clicks == 0:
+        return ""
 
     filtered_df = df[(df['industry'] == selected_industry) & (df['company_size'] == selected_size)]
     ai_generated_text = ""
 
     if active_tab == "tab-overview":
-        # ** THE FIX IS HERE: We now pass the funnel numbers to the AI **
         total_reach = filtered_df['audience_reach'].sum()
         total_engagement = filtered_df['engagement_metric'].sum()
-        total_conversions = filtered_df['conversions'].sum()
+        total_conversions = filtered_df.get('conversions', 0).sum()
         ai_generated_text = generate_overview_insights(total_reach, total_engagement, total_conversions)
     elif active_tab == "tab-channel":
         ai_generated_text = generate_channel_insights(filtered_df)
