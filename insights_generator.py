@@ -1,3 +1,4 @@
+# insights_generator.py
 import os
 import pandas as pd
 import google.generativeai as genai
@@ -24,10 +25,8 @@ def get_ai_summary(prompt_text):
         print(f"--- INSIGHTS ERROR: Gemini API call failed. {e} ---")
         return "An error occurred while generating AI insights. Please check the server logs."
 
-def generate_overview_insights(filtered_df):
-    total_reach = filtered_df['audience_reach'].sum()
-    total_engagement = filtered_df['engagement_metric'].sum()
-    total_conversions = filtered_df.get('conversions', 0).sum()
+# --- LOGIC FIX: Changed function to accept totals directly, not the entire DataFrame ---
+def generate_overview_insights(total_reach, total_engagement, total_conversions):
     reach_to_engagement_rate = (total_engagement / total_reach * 100) if total_reach > 0 else 0
     engagement_to_conversion_rate = (total_conversions / total_engagement * 100) if total_engagement > 0 else 0
     prompt = f"""

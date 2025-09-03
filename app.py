@@ -1,3 +1,4 @@
+# app.py
 import pandas as pd
 import dash
 from dash import dcc, html, Input, Output, State
@@ -27,14 +28,11 @@ server = app.server
 # --- App Layout ---
 app.layout = html.Div(className="bg-light", style={'minHeight': '100vh'}, children=[
     dbc.Container([
-        # --- NEW: Responsive Header ---
         dbc.Row([
-            # On large screens, title takes up 5/12 of space. On small screens, it takes full width.
             dbc.Col(
                 html.H1("Marketing Strategy Dashboard", className="text-primary header-title"), 
                 lg=5, width=12, className="text-center text-lg-start"
             ),
-            # On large screens, filters take up 7/12. On small, they take full width and get a margin-top.
             dbc.Col([
                 dbc.Row([
                     dbc.Col([
@@ -57,7 +55,6 @@ app.layout = html.Div(className="bg-light", style={'minHeight': '100vh'}, childr
             ], lg=7, width=12, className="mt-4 mt-lg-0")
         ], align="center", className="py-4"),
 
-        # Main Tabbed Interface
         dbc.Tabs(id="dashboard-tabs", active_tab="tab-overview", children=[
             dbc.Tab(label="Executive Overview", tab_id="tab-overview"),
             dbc.Tab(label="Channel Performance", tab_id="tab-channel"),
@@ -101,7 +98,8 @@ def render_charts_and_kpis(active_tab, selected_industry, selected_size):
     if active_tab == "tab-overview":
         total_spend = filtered_df['ad_spend'].sum()
         total_reach = filtered_df['audience_reach'].sum()
-        total_conversions = filtered_df.get('conversions', 0).sum()
+        # --- POLISHED: Simplified .sum() as the column is guaranteed to exist ---
+        total_conversions = filtered_df['conversions'].sum()
         avg_conversion_rate = (total_conversions / total_reach * 100) if total_reach > 0 else 0
         
         spend_by_channel = filtered_df.groupby('marketing_channel')['ad_spend'].sum().reset_index()
@@ -129,10 +127,19 @@ def render_charts_and_kpis(active_tab, selected_industry, selected_size):
     elif active_tab == "tab-channel":
         channel_performance = filtered_df.groupby('marketing_channel').agg(total_spend=('ad_spend', 'sum'), avg_cvr=('conversion_rate', 'mean'), avg_cpe=('cost_per_engagement', 'mean')).reset_index()
         fig_channel_roi = px.scatter(
-            channel_performance, x='avg_cpe', y='avg_cvr', size='total_spend', color='marketing_channel',
+            channel_performance, 
+            x='avg_cpe', y='avg_cvr', 
+            size='total_spend', color='marketing_channel',
             title="Channel Performance: Cost vs. Conversion Rate",
-            labels={'avg_cpe': 'Average Cost Per Engagement ($)', 'avg_cvr': 'Average Conversion Rate (%)'},
-            template=template, size_max=50
+            labels={'avg_cpe': 'Average Cost Per Engagement ($)', 'avg_cvr': 'Average Conversion Rate (%)', 'total_spend': 'Total Ad Spend'},
+            template=template, size_max=60,
+            # --- UI/UX POLISH: Added hover_data for richer insights on mouse-over ---
+            hover_name='marketing_channel',
+            hover_data={
+                'avg_cvr':':.2f%', # Format as percentage
+                'avg_cpe':':$.2f', # Format as currency
+                'total_spend':':$,.0f' # Format as currency
+            }
         )
         return html.Div([
             dbc.Row([dbc.Col(dbc.Card(dcc.Graph(figure=fig_channel_roi)), width=12, className="mb-4")]),
@@ -140,8 +147,8 @@ def render_charts_and_kpis(active_tab, selected_industry, selected_size):
         ])
 
     elif active_tab == "tab-audience":
-        fig_audience_cvr = px.bar(filtered_df.groupby('target_audience')['conversion_rate'].mean().sort_values().reset_index(), x='conversion_rate', y='target_audience', orientation='h', title='Average Conversion Rate by Target Audience', labels={'conversion_rate': 'Avg. Conversion Rate (%)', 'target_audience': 'Audience Segment'}, template=template)
-        fig_device_cvr = px.bar(filtered_df.groupby('device')['conversion_rate'].mean().sort_values(ascending=False).reset_index(), x='device', y='conversion_rate', title='Average Conversion Rate by Device', labels={'conversion_rate': 'Avg. Conversion Rate (%)', 'device': 'Device Type'}, color='device', template=template)
+        fig_audience_cvr = px.bar(filtered_df.groupby('target_audience')['conversion_rate'].mean().sort_values().reset_index(), x='conversion_rate', y='target_audience', orientation='h', title='Avg. Conversion Rate by Audience', labels={'conversion_rate': 'Avg. Conversion Rate (%)', 'target_audience': 'Audience Segment'}, template=template)
+        fig_device_cvr = px.bar(filtered_df.groupby('device')['conversion_rate'].mean().sort_values(ascending=False).reset_index(), x='device', y='conversion_rate', title='Avg. Conversion Rate by Device', labels={'conversion_rate': 'Avg. Conversion Rate (%)', 'device': 'Device Type'}, color='device', template=template)
         return html.Div([
             dbc.Row([
                 dbc.Col(dbc.Card(dcc.Graph(figure=fig_audience_cvr)), width=12, lg=6, className="mb-4"),
@@ -169,7 +176,8 @@ def generate_ai_summary(n_clicks, active_tab, selected_industry, selected_size):
     if active_tab == "tab-overview":
         total_reach = filtered_df['audience_reach'].sum()
         total_engagement = filtered_df['engagement_metric'].sum()
-        total_conversions = filtered_df.get('conversions', 0).sum()
+        total_conversions = filtered_df['conversions'].sum()
+        # The function call is now correct
         ai_generated_text = generate_overview_insights(total_reach, total_engagement, total_conversions)
     elif active_tab == "tab-channel":
         ai_generated_text = generate_channel_insights(filtered_df)

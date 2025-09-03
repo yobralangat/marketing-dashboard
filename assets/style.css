@@ -1,0 +1,10 @@
+
+.header-title {
+    /* 
+       Min size: 1.8rem (won't get smaller than this)
+       Preferred size: 4vw (scales with 4% of the viewport width)
+       Max size: 2.5rem (won't get bigger than this)
+    */
+    font-size: clamp(1.8rem, 4vw, 2.5rem);
+    font-weight: 700;
+}
