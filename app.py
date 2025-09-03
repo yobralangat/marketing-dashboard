@@ -5,7 +5,6 @@ import dash_bootstrap_components as dbc
 import plotly.express as px
 from dotenv import load_dotenv
 
-# Import the AI insight generator functions
 from insights_generator import generate_overview_insights, generate_channel_insights, generate_audience_insights
 
 # --- Configuration & Setup ---
@@ -15,9 +14,8 @@ APP_THEME = dbc.themes.LUX
 # --- Load the FAST Pre-processed Data ---
 try:
     df = pd.read_parquet('assets/marketing_data.parquet')
-    print("--- APP: Pre-processed Parquet file loaded successfully. ---")
 except FileNotFoundError:
-    print("--- APP FATAL ERROR: Processed data file not found. Please run 'preprocess.py' first. ---")
+    print("FATAL ERROR: Processed data file not found. Please run 'preprocess.py' first.")
     exit()
 
 # --- Initialize the Dash App ---
@@ -57,7 +55,7 @@ app.layout = html.Div(className="bg-light", style={'minHeight': '100vh'}, childr
     ], fluid=False)
 ])
 
-# --- Callback for FAST Components (Charts and KPIs) ---
+# --- Main Callback for FAST Components (Charts and KPIs) ---
 @app.callback(
     Output('tab-content', 'children'),
     Input('dashboard-tabs', 'active_tab'),
@@ -69,7 +67,6 @@ def render_charts_and_kpis(active_tab, selected_industry, selected_size):
         return dash.no_update
 
     filtered_df = df[(df['industry'] == selected_industry) & (df['company_size'] == selected_size)]
-    
     if filtered_df.empty:
         return dbc.Alert("No data available for the selected filters.", color="warning")
 
@@ -84,14 +81,11 @@ def render_charts_and_kpis(active_tab, selected_industry, selected_size):
     ])
 
     if active_tab == "tab-overview":
-        total_spend = filtered_df['ad_spend'].sum()
-        total_reach = filtered_df['audience_reach'].sum()
+        total_spend, total_reach = filtered_df['ad_spend'].sum(), filtered_df['audience_reach'].sum()
         total_conversions = filtered_df.get('conversions', 0).sum()
         avg_conversion_rate = (total_conversions / total_reach * 100) if total_reach > 0 else 0
-        
         spend_by_channel = filtered_df.groupby('marketing_channel')['ad_spend'].sum().reset_index()
         fig_spend_dist = px.pie(spend_by_channel, names='marketing_channel', values='ad_spend', title="Ad Spend by Channel", hole=0.4, template=template)
-        
         total_engagement = filtered_df['engagement_metric'].sum()
         funnel_data = dict(number=[total_reach, total_engagement, total_conversions], stage=["Audience Reached", "Engagements", "Conversions"])
         fig_funnel = px.funnel(funnel_data, x='number', y='stage', title=f"Marketing Funnel", template=template)
@@ -162,7 +156,7 @@ def generate_ai_summary(n_clicks, active_tab, selected_industry, selected_size):
         ai_generated_text = generate_audience_insights(filtered_df)
     
     return dbc.Alert([
-        html.H5("AI Analyst Summary", className="alert-heading"), 
+        html.H5("Key Insights", className="alert-heading"), 
         html.Hr(), 
         dcc.Markdown(ai_generated_text)
     ], color="info", className="mt-4")

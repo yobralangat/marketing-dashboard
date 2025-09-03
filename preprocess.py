@@ -1,13 +1,7 @@
-# preprocess.py
 import pandas as pd
 import os
-import datetime as dt
 
 def preprocess_marketing_data(input_file='data/digital_marketing_campaigns_smes.CSV'):
-    """
-    Reads the raw marketing CSV, cleans and enriches it, and saves it
-    as an optimized Parquet file in the 'assets' folder.
-    """
     if not os.path.exists('assets'):
         os.makedirs('assets')
     
@@ -19,7 +13,6 @@ def preprocess_marketing_data(input_file='data/digital_marketing_campaigns_smes.
         return
 
     print("Cleaning and enriching data...")
-    
     df.columns = [col.replace(' ', '_').replace('(', '').replace(')', '').lower() for col in df.columns]
 
     if 'company_size' in df.columns:
@@ -51,21 +44,11 @@ def preprocess_marketing_data(input_file='data/digital_marketing_campaigns_smes.
 
     if 'audience_reach' in df.columns and 'conversion_rate' in df.columns:
         df['conversions'] = (df['audience_reach'] * (df['conversion_rate'] / 100)).astype(int)
-    
-    # Filter out non-product entries
-    if 'description' in df.columns:
-        df['description_lower'] = df['description'].str.lower()
-        non_product_keywords = ['adjustment', 'manual', 'postage', 'discount', 'bank charges', 'credit', 'write off', 'carriage', 'dotcom']
-        is_non_product = df['description_lower'].str.contains('|'.join(non_product_keywords), na=False)
-        df = df[~is_non_product]
-        df.drop(columns=['description_lower'], inplace=True)
 
     output_path = 'assets/marketing_data.parquet'
     print(f"Saving processed data to '{output_path}'...")
     df.to_parquet(output_path)
-    
     print("Pre-processing complete!")
 
 if __name__ == '__main__':
-    # Make sure to pass the correct path to your raw CSV file
-    preprocess_marketing_data(input_file='data/digital_marketing_campaigns_smes.CSV')
+    preprocess_marketing_data()
