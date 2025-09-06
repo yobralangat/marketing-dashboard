@@ -1,10 +1,18 @@
+/* This rule specifically targets the 'strong' (bold) tags 
+   only within the component that has the ID 'ai-output-div'. 
+   This ensures it won't affect any other part of your dashboard. */
+#ai-output-div strong {
+  font-weight: bold;
+}
 
-.header-title {
-    /* 
-       Min size: 1.8rem (won't get smaller than this)
-       Preferred size: 4vw (scales with 4% of the viewport width)
-       Max size: 2.5rem (won't get bigger than this)
-    */
-    font-size: clamp(1.8rem, 4vw, 2.5rem);
-    font-weight: 700;
+/* 
+   By default, the root container for a Dash app has a max-width
+   that can interfere with zooming. This rule overrides that.
+   We tell it that the container's width AND height should be 100%
+   of the viewport's (the browser window's) width and height.
+   The 'vw' unit means "viewport width" and 'vh' means "viewport height".
+*/
+#_dash-app-content {
+    width: 100vw;
+    height: 100vh;
 }

@@ -7,3 +7,5 @@ python-dotenv
 pyarrow
 google-generativeai
 flask-caching
+dash-ag-grid
+markdown
