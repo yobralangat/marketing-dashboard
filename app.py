@@ -60,22 +60,17 @@ def update_data_and_get_session_id(selected_industry, selected_size):
     cache.set(session_id, filtered_df, timeout=CACHE_TIMEOUT)
     return session_id
 
-# (Tab content callback is unchanged)
 @app.callback(Output('tab-content', 'children'), Input('dashboard-tabs', 'active_tab'), Input('session-id-store', 'data'))
 def render_tab_content(active_tab, session_id):
     if not session_id: raise PreventUpdate
     filtered_df = cache.get(session_id)
     if filtered_df is None or filtered_df.empty: return dbc.Alert("No data available for the selected filters.", color="warning")
     
-    # --- THIS IS THE EDIT ---
-    # The output component is changed from html.Div back to the correct dcc.Markdown component.
-    # This will now correctly parse and display the bolding and bullet points.
     ai_section = html.Div([
         html.Hr(className="my-5"),
         dbc.Row([dbc.Col(html.H4("Automated Insights"), width="auto"), dbc.Col(dbc.Button("✨ Generate AI Summary", id="generate-ai-button", n_clicks=0, color="primary"), width="auto")], justify="between", align="center"),
         dbc.Spinner(dcc.Markdown(id="ai-output-div", className="text-body-secondary border rounded p-3 mt-3", style={"whiteSpace": "pre-wrap"}))
     ])
-    # --- END OF EDIT ---
 
     template = "plotly_white"
     if active_tab == "tab-overview":
@@ -91,6 +86,7 @@ def render_tab_content(active_tab, session_id):
         spend_dist = filtered_df.groupby('marketing_channel', as_index=False)['ad_spend'].sum()
         fig_pie_spend = px.pie(spend_dist, names='marketing_channel', values='ad_spend', title="Budget Allocation", hole=0.4, template=template)
         return html.Div([kpi_cards, dbc.Row([dbc.Col(dcc.Graph(figure=fig_funnel), lg=7), dbc.Col(dcc.Graph(figure=fig_pie_spend), lg=5), ], className="mt-4", align="center"), ai_section])
+
     elif active_tab == "tab-channel":
         channel_perf = filtered_df.groupby('marketing_channel', as_index=False).agg(total_spend=('ad_spend', 'sum'), avg_cvr=('conversion_rate', 'mean'), avg_cpc=('cost_per_conversion', 'mean')).round(2)
         most_efficient = channel_perf.loc[channel_perf['avg_cpc'][channel_perf['avg_cpc']>0].idxmin()] if not channel_perf.empty and (channel_perf['avg_cpc']>0).any() else None
@@ -99,15 +95,28 @@ def render_tab_content(active_tab, session_id):
         fig_bubble = px.scatter(channel_perf, x='avg_cpc', y='avg_cvr', size='total_spend', color='marketing_channel', title="Channel Efficiency vs. Conversion Rate", template=template, size_max=60, hover_name='marketing_channel', labels={"avg_cpc": "Avg. Cost Per Conversion ($)", "avg_cvr": "Avg. Conversion Rate (%)", "total_spend": "Total Spend ($)"})
         table = dag.AgGrid(rowData=channel_perf.to_dict("records"), columnDefs=[{"headerName": "Channel", "field": "marketing_channel"}, {"headerName": "Total Spend ($)", "field": "total_spend"}, {"headerName": "Avg. CVR (%)", "field": "avg_cvr"}, {"headerName": "Avg. CPC ($)", "field": "avg_cpc"}, ], defaultColDef={"sortable": True, "filter": True, "resizable": True}, dashGridOptions={"domLayout": "autoHeight"}, )
         return html.Div([kpi_cards, dbc.Row([dbc.Col(dcc.Graph(figure=fig_bubble), lg=7), dbc.Col([html.H4("Detailed Channel Data", className="mt-4 mt-lg-0"), table], lg=5), ], align="center", className="mt-4"), ai_section])
+
     elif active_tab == "tab-audience":
-        audience_cvr = filtered_df.groupby('target_audience', as_index=False)['conversion_rate'].mean()
-        top_audience = audience_cvr.loc[audience_cvr['conversion_rate'].idxmax()] if not audience_cvr.empty else None
-        device_cvr = filtered_df.groupby('device', as_index=False)['conversion_rate'].mean()
-        top_device = device_cvr.loc[device_cvr['conversion_rate'].idxmax()] if not device_cvr.empty else None
-        kpi_cards = dbc.Row([dbc.Col(dbc.Card(dbc.CardBody([html.H3(top_audience['target_audience']), html.P("Top Converting Audience")])) if top_audience is not None else "", md=6), dbc.Col(dbc.Card(dbc.CardBody([html.H3(top_device['device']), html.P("Top Converting Device")])) if top_device is not None else "", md=6), ], className="text-center text-primary mt-2 mb-4 g-4")
+        # --- THIS IS THE FIX ---
+        # We now group by the SUM of conversions, not the average of a rate.
+        # This aligns the KPIs with the chart and business reality.
+        audience_conversions = filtered_df.groupby('target_audience')['conversions'].sum()
+        top_audience = audience_conversions.idxmax() if not audience_conversions.empty else "N/A"
+
+        device_conversions = filtered_df.groupby('device')['conversions'].sum()
+        top_device = device_conversions.idxmax() if not device_conversions.empty else "N/A"
+        # --- END OF FIX ---
+
+        kpi_cards = dbc.Row([
+            dbc.Col(dbc.Card(dbc.CardBody([html.H3(top_audience), html.P("Top Audience by Total Conversions")])), md=6),
+            dbc.Col(dbc.Card(dbc.CardBody([html.H3(top_device), html.P("Top Device by Total Conversions")])) if top_device is not None else "", md=6),
+        ], className="text-center text-primary mt-2 mb-4 g-4")
+        
+        # The sunburst chart logic was already correct, so it remains unchanged.
         sunburst_df = filtered_df.groupby(['target_audience', 'device'], as_index=False)['conversions'].sum()
         fig_sunburst = px.sunburst(sunburst_df, path=['target_audience', 'device'], values='conversions', title="Conversions by Audience and Device", template=template)
         return html.Div([kpi_cards, dcc.Graph(figure=fig_sunburst), ai_section])
+
     elif active_tab == "tab-geo":
         geo_perf = filtered_df.groupby('region', as_index=False).agg(total_spend=('ad_spend', 'sum'), avg_cpc=('cost_per_conversion', 'mean')).round(2)
         highest_spend = geo_perf.loc[geo_perf['total_spend'].idxmax()] if not geo_perf.empty else None
@@ -116,7 +125,6 @@ def render_tab_content(active_tab, session_id):
         fig_geo_spend = px.bar(geo_perf.sort_values('total_spend', ascending=False), x='region', y='total_spend', color='region', title="Ad Spend by Region", template=template, labels={"total_spend": "Total Ad Spend ($)", "region": "Region"})
         fig_geo_cpc = px.bar(geo_perf.sort_values('avg_cpc', ascending=True), x='region', y='avg_cpc', color='region', title="Efficiency (CPC) by Region", template=template, labels={"avg_cpc": "Avg. Cost Per Conversion ($)", "region": "Region"})
         return html.Div([kpi_cards, dbc.Row([dbc.Col(dcc.Graph(figure=fig_geo_spend), width=12, lg=6), dbc.Col(dcc.Graph(figure=fig_geo_cpc), width=12, lg=6)], className="mt-4"), ai_section])
-
 # (The fast AI trigger callback is unchanged)
 @app.callback(
     Output('ai-trigger-store', 'data'),
